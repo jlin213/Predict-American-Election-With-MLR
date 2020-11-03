@@ -1,0 +1,151 @@
+---
+title: "Predict American Election Popular Vote Outcome with MLR"
+author: "Jo-Yen Lin"
+date: "November 2nd, 2020"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lme4)
+library(knitr)
+# Loading in the cleaned survey Data
+survey_data <- read_csv("/Users/juliannelin/Desktop/Fall 2020/STA304 A3/survey_data.csv")
+
+# Loading in the cleaned census Data
+census_data <- read_csv("/Users/juliannelin/Desktop/Fall 2020/STA304 A3/census_data.csv")
+
+```
+
+# Predict American Election Popular Vote Outcome with MLR
+## Jo-Yen Lin 
+## November 2nd, 2020
+## Code and data supporting this analysis is available at: https://github.com/jlin213/Predict-American-Election-With-MLR
+
+# Model
+
+In this study, we are interested in the popular vote outcome of the 2020 American federal election (Dassonneville et al.). By using post-stratification with survey data from Democracy Fund + UCLA Nationscape and census data from IPUMS USA, we will predict who will win the presidential election. 
+
+## Model Specifics
+The models that will be used are two multilevel logistic linear regression (MLR) models, where one will be modeling proportion of voters who will vote for Donald Trump and another will be modeling the proportion of voters who will vote for Joe Biden. The predictors are race and education, with census region to model the intercept. Mathematically, the model for proportion of voters who will vote for Donald Trump is:
+$$y_{Trump}= \beta_{race} + \beta_{education}x_{education}+ u_{0j}$$
+$$\beta_{race} = r_{00} + r_{01} x_{region}$$
+The model for proportion of voters who will vote for Joe Biden is: 
+$$y_{Biden}= \beta_{race} + \beta_{education}x_{education}+ u_{0j}$$
+$$\beta_{race} = r_{00} + r_{01} x_{region}$$
+The first equation is simplified since there are 7 races and 11 different education levels. $y_{Trump}$ represents the proportion of voters who will vote for Donald Trump and $y_{Biden}$ represents the proportion of voters who will vote for Joe Biden. For $\beta_{race}$, $r_{00}$ and $r_{01}$ are the intercept and slope of the random effects term, in which we use different census region to model the intercept. $u_{0j}$ is the random error component for the deviation of the intercept of different census regions from the overall intercept.
+
+```{r, include=FALSE}
+# Cleaning survey_data and census_data to match in levels 
+# levels(race): White, Black/African American, Chinese, Japanese, American Indian or Alaska Native, Other Asian or Pacific Islander, Other 
+
+
+survey_data <- survey_data %>% mutate( race = case_when(
+  race_ethnicity %in% c("Asian (Asian Indian)","Asian (Korean)", "Asian (Vietnamese)", "Asian (Other)", "Pacific Islander (Guamanian)", "Pacific Islander (Native Hawaiian)", "Pacific Islander (Other)","Pacific Islander (Samoan)") ~ "Other Asian or Pacific Islander",
+  race_ethnicity == "White" ~ "White", 
+  race_ethnicity == "American Indian or Alaska Native" ~ "American Indian or Alaska Native",
+  race_ethnicity == "Some other race" ~ "Some other race",
+  race_ethnicity == "Black, or African American" ~ "Black, or African American", 
+  race_ethnicity == "Asian (Chinese)" ~ "Chinese",
+  race_ethnicity == "Asian (Japanese)" ~ "Japanese"
+))
+```
+
+
+```{r, echo=FALSE}
+model_trump <- glmer (vote_trump ~ race + education+ (1 |census_region), data=survey_data, family = binomial)
+model_biden <- glmer (vote_biden ~ race + education+ (1 |census_region), data=survey_data, family = binomial)
+```
+
+## Post-Stratification 
+
+With post-stratification analysis, we can estimate the different proporitions of voters who will vote for Donald Trump and Joe Biden through with the census data. The cells are divided based on race, education, and census regions. Therefore, each bin is different in race, education, and census regions. Then, by estimating the proportion of voters in each bin, we will weight each proportion estimate based on the population size given by the census data. Then, we will sum all these values and divide by the eniter population size.
+
+```{r, echo=FALSE}
+
+# Here I will perform the post-stratification calculation
+# census_data$estimate <-
+#   model %>%
+#   predict(newdata = census_data)
+# 
+# census_data %>%
+#   mutate(alp_predict_prop = estimate*n) %>%
+#   summarise(alp_predict = sum(alp_predict_prop)/sum(n))
+
+census_data$logodds_estimate_trump <-
+  model_trump %>%
+  predict(newdata = census_data)
+
+census_data$estimate_trump <-
+  exp(census_data$logodds_estimate_trump)/(1+exp(census_data$logodds_estimate_trump))
+
+trump_res <- census_data %>%
+  mutate(alp_predict_prop_trump = estimate_trump*n) %>%
+  summarise(alp_predict_trump = sum(alp_predict_prop_trump)/sum(n))
+
+census_data$logodds_estimate_biden <-
+  model_biden %>%
+  predict(newdata = census_data)
+
+census_data$estimate_biden <-
+  exp(census_data$logodds_estimate_biden)/(1+exp(census_data$logodds_estimate_biden))
+
+biden_res <- census_data %>%
+  mutate(alp_predict_prop_biden = estimate_biden*n) %>%
+  summarise(alp_predict_biden = sum(alp_predict_prop_biden)/sum(n))
+trump_res <- round(trump_res, digits=4)
+biden_res <- round(biden_res, digits=4)
+
+```
+
+# Results
+
+```{r, echo=FALSE}
+ggplot(data=survey_data, aes(x=race)) + geom_bar(stat="count")+ggtitle("Figure 1: Count of different races in the survey data") +theme(text=element_text(size=8,  family="Times"),  axis.text.x=element_text(angle=15, vjust = 1, hjust=1))
+```
+
+```{r, echo=FALSE}
+ggplot(data=survey_data, aes(x=education)) + geom_bar(stat="count")+ggtitle("Figure 2: Count of different education levels in the survey data") +theme(text=element_text(size=9,  family="Times"), axis.text.x=element_text(angle=30, vjust = 1, hjust=1))
+```
+
+```{r, echo=FALSE}
+kable(summary(model_trump)$coefficients, caption="Slope and intercept values of the MLR model - Donald Trump", escape=TRUE, digits =4)
+kable(summary(model_biden)$coefficients, caption="Slope and intercept values of the MLR model - Joe Biden", escape=TRUE, digits=4)
+kable(trump_res, caption="Proportion of voters who will vote for Donald Trump") 
+kable(biden_res, caption="Proportion of voters who will vote for Joe Biden")
+```
+
+From Table 3, we predicted that the proportion of voters that will vote Donald Trump is `r trump_res`, and the proportion of voters that will vote for Joe Biden is `r biden_res`. This is based on the the post-stratification analysis mentioned in previous section with the multilevel logistic regression models with race and education as independent variables and census region to model the intercept.  
+
+# Discussion
+
+From Table 3 and Table 4, we can see that we estimate about 39% of the population will vote for Donald Trump, while about 41% of the population will vote for Joe Biden. That is, from our mathematical model in Model section, $y_{Trump}$ is equal to `r trump_res` and $y_{Biden}$ is equal to `r biden_res`. After our post-stratification analysis, we predict that Joe Biden will win the popular vote of the 2022 American Federal election. 
+
+## Weaknesses
+
+A significant weakness of the models are how education have high p-value across all levels. From Table 1 and Table 2, each factor level of education seems to have high p-value, that is, they are not as significant factor. In contrast, most of the levels in race are lower than 0.05 significant level. This suggests that choosing education as the independent variable may not have been the right choice. Initially education was chosen due to both data sets have very similar levels, which requires little cleaning. Also, another reason that we considered education as a variable, we are interested if higher education will vote for certain candidate. 
+Another weakness that we can observe is from Figure 2, there is significant population that are white, while most of the other races are covering very little percentage in the survey. While post-stratification takes into account this issue with dividing the census data into cells, and use the proportion to predict the results, we still cannot ignore the fact that the imbalance of population in different races could mean we have many underrepresented population in almost all the races in the data. This could suggests race is not a good independent variable to use in the models. 
+
+## Next Steps
+
+Next steps of this study include exploring different independent variables in both survey and census data. For example, we can include income as an independent variable. Biden has proposed heavy taxes on those who are high income (400k annual income), as well as imposes higher corporate income tax (Watson et al.). It would be interesting to see if this tax plan influences those who have higher income to vote for Trump. Also, a subsequent survey to collect newer data on would be beneficial, since the surveys are collected on June 25th, 2020. Getting survey data that is closer to the election, would likely to predict the more plausible candidate who will win the election with popular vote, since people are more likely to think through who they are going to vote closer to the election instead of five months before the election. 
+
+# References
+
+Rohan Alexander. Telling Stories With Data, May 17, 2020. Retrieved from https://www.tellingstorieswithdata. com/
+
+Dassonneville, Ruth, and Charles Tien. “Introduction to Forecasting the 2020 US Elections.” PS: Political Science & Politics, 2020, pp. 1–5., doi:10.1017/S104909652000147X.
+
+Garrett Watson, Huaquan Li, Taylor LaJoie, "Details and Analysis of Democratic Presidential Nominee Joe Biden’s Tax Plan", Tax Foundation, October 22, 2020.
+
+Marnie Downes, Lyle C Gurrin, Dallas R English, Jane Pirkis, Dianne Currier, Matthew J Spittal, John B Carlin, Multilevel Regression and Poststratification: A Modeling Approach to Estimating Population Quantities From Highly Selected Survey Samples, American Journal of Epidemiology, Volume 187, Issue 8, August 2018, Pages 1780–1790, https://doi.org/10.1093/aje/kwy070
+
+Steven Ruggles, Sarah Flood, Ronald Goeken, Josiah Grover, Erin Meyer, Jose Pacas and Matthew Sobek. IPUMS USA: Version 10.0 [AMERICAN COMMUNITY SURVEY 2014-2018 5-YEAR SAMPLE
+]. Minneapolis, MN: IPUMS, 2020.
+https://doi.org/10.18128/D010.V10.0
+
+Tausanovitch, Chris and Lynn Vavreck. 2020. Democracy Fund + UCLA Nationscape, October 10-17, 2019 (version 20200814). Retrieved fromhttps://www.voterstudygroup.org/publication/nationscape-data-set.
+
+
+
